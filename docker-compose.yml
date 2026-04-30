@@ -1,0 +1,26 @@
+version: '3.8'
+services:
+  pc1:
+    image: alpine
+    command: sh -c "sleep infinity"
+    networks: [vlan10]
+
+  pc2:
+    image: alpine
+    command: sh -c "sleep infinity"
+    networks: [vlan10]
+
+  pc3:
+    image: alpine
+    command: sh -c "sleep infinity"
+    networks: [vlan20]
+
+  router:
+    image: ubuntu:24.04
+    privileged: true
+    command: sh -c "apt update && apt install -y iproute2 iptables && sysctl -w net.ipv4.ip_forward=1 && sleep infinity"
+    networks: [vlan10, vlan20]
+
+networks:
+  vlan10:
+  vlan20:

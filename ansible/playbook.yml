@@ -1,0 +1,6 @@
+- hosts: localhost
+  tasks:
+    - name: Enable IP forwarding
+      command: docker exec router sysctl -w net.ipv4.ip_forward=1
+    - name: Allow forwarding
+      command: docker exec router iptables -A FORWARD -j ACCEPT
