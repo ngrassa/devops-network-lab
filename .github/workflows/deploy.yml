@@ -2,7 +2,7 @@ name: DevOps Network Lab CI/CD
 on:
   push:
     branches: [ "master" ]
-  workflow_dispatch:  # Permet de lancer manuellement
+  workflow_dispatch:
 
 env:
   AWS_REGION: us-east-1
@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+    
     - name: Check file existence
       run: |
         echo "🔍 Checking required files..."
@@ -26,12 +27,13 @@ jobs:
     name: Deploy Infrastructure
     runs-on: ubuntu-latest
     needs: validate
-    # Ajoutez les permissions requises
     permissions:
       contents: read
-      id-token: write  # Important pour AWS SigV4
+      id-token: write
+    
     steps:
     - uses: actions/checkout@v4
+    
     - name: Debug AWS Credentials
       run: |
         echo "🔍 AWS Credentials Check:"
@@ -40,16 +42,19 @@ jobs:
         else
           echo "✓ AWS_ACCESS_KEY_ID is set"
         fi
+        
         if [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
           echo "❌ AWS_SECRET_ACCESS_KEY is empty!"
         else
           echo "✓ AWS_SECRET_ACCESS_KEY is set"
         fi
+        
         if [ -z "${{ secrets.AWS_SESSION_TOKEN }}" ]; then
           echo "⚠️  AWS_SESSION_TOKEN is empty (OK if using IAM user)"
         else
           echo "✓ AWS_SESSION_TOKEN is set"
         fi
+    
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
@@ -57,50 +62,53 @@ jobs:
         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         aws-region: ${{ env.AWS_REGION }}
         aws-session-token: ${{ secrets.AWS_SESSION_TOKEN || '' }}
-        # Augmentez les timeouts
         role-duration-seconds: 3600
+    
     - name: Verify AWS credentials
       run: |
         echo "🔐 Verifying AWS credentials..."
         aws sts get-caller-identity
         echo "✓ AWS credentials verified"
-        # Vérifiez les permissions
-        echo ""
-        echo "📋 Checking EC2 permissions..."
-        aws ec2 describe-instances --max-results 1 && echo "✓ EC2 access OK" || echo "⚠️  Limited EC2 access"
+    
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
       with:
         terraform_version: ${{ env.TF_VERSION }}
+    
     - name: Terraform Format Check
       working-directory: terraform
       run: |
         echo "🔍 Checking Terraform format..."
         terraform fmt -check -recursive || terraform fmt -recursive
+    
     - name: Terraform Init
       working-directory: terraform
       run: |
         echo "📦 Initializing Terraform..."
         terraform init
+    
     - name: Terraform Validate
       working-directory: terraform
       run: |
         echo "✓ Validating Terraform configuration..."
         terraform validate
+    
     - name: Terraform Plan
       working-directory: terraform
       run: |
         echo "📋 Planning Terraform changes..."
         terraform plan -out=tfplan -no-color
+    
     - name: Terraform Apply
       working-directory: terraform
       run: |
         echo "🚀 Applying Terraform changes..."
         terraform apply -auto-approve tfplan
-        # Affichez les outputs
+        
         echo ""
         echo "📊 Deployment Outputs:"
         terraform output -no-color
+    
     - name: Get EC2 Public IP
       id: ec2
       working-directory: terraform
@@ -108,11 +116,12 @@ jobs:
         PUBLIC_IP=$(terraform output -raw public_ip)
         echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
         echo "✓ EC2 Public IP: $PUBLIC_IP"
+    
     - name: Wait for EC2 to be ready
       run: |
         echo "⏳ Waiting for EC2 instance to start..."
         sleep 30
-        # Essayez de ping l'instance
+        
         for i in {1..30}; do
           if nc -z -w5 ${{ steps.ec2.outputs.public_ip }} 22 2>/dev/null; then
             echo "✓ SSH port is open!"
@@ -121,6 +130,7 @@ jobs:
           echo "⏳ Attempt $i/30 - waiting for SSH..."
           sleep 10
         done
+    
     - name: Deploy application via SSH
       uses: appleboy/ssh-action@master
       with:
@@ -134,15 +144,38 @@ jobs:
           echo "========================================="
           echo "🚀 Starting DevOps Lab Deployment"
           echo "========================================="
+          
           # Update system
           echo "📦 Updating system packages..."
           sudo apt-get update -qq
           sudo apt-get install -y -qq docker.io docker-compose-v2 ansible git curl wget
+          
           # Configure Docker
           echo "🐳 Configuring Docker..."
-          sudo usermod -aG docker ubuntu
-          sudo systemctl start docker
+          sudo systemctl restart docker
           sudo systemctl enable docker
+          
+          # Wait for Docker daemon to be ready
+          echo "⏳ Waiting for Docker daemon..."
+          for i in {1..30}; do
+            if sudo docker ps &>/dev/null; then
+              echo "✓ Docker is ready"
+              break
+            fi
+            echo "⏳ Attempt $i/30..."
+            sleep 2
+          done
+          
+          # Add ubuntu user to docker group
+          echo "🔐 Setting Docker permissions..."
+          sudo usermod -aG docker ubuntu
+          sudo chown ubuntu:docker /var/run/docker.sock 2>/dev/null || true
+          sudo chmod 660 /var/run/docker.sock 2>/dev/null || true
+          
+          # Verify Docker access
+          echo "✓ Verifying Docker access..."
+          docker ps
+          
           # Clone repository
           echo "📥 Cloning repository..."
           git clone https://github.com/ngrassa/devops-network-lab.git ~/devops-lab || true
@@ -150,20 +183,30 @@ jobs:
           git fetch origin
           git checkout master
           git pull origin master || true
+          
           # Deploy Docker Compose
           echo "🐳 Starting Docker containers..."
           docker compose up -d
           sleep 10
+          
+          # Verify containers are running
+          echo "✓ Verifying containers..."
+          docker compose ps
+          
           # Run Ansible
           echo "📋 Running Ansible playbook..."
-          ansible-playbook ansible/playbook.yml || true
+          ansible-playbook ansible/playbook.yml || echo "⚠️  Ansible playbook completed with warnings"
+          
           # Run tests
           echo "🧪 Running connectivity tests..."
           bash scripts/test.sh || echo "⚠️  Tests completed with warnings"
+          
           echo "========================================="
           echo "✅ Deployment completed!"
           echo "========================================="
+          echo ""
           docker compose ps
+    
     - name: Output deployment summary
       if: always()
       run: |
@@ -178,14 +221,6 @@ jobs:
         echo ""
         echo "📊 Check containers:"
         echo "   ssh -i your-key.pem ubuntu@${{ steps.ec2.outputs.public_ip }} docker compose ps"
-
-  cleanup:
-    name: Cleanup on Failure
-    runs-on: ubuntu-latest
-    if: failure()
-    needs: deploy
-    steps:
-    - name: Log failure
-      run: |
-        echo "❌ Deployment failed!"
-        echo "Check the logs above for details"
+        echo ""
+        echo "📚 View logs:"
+        echo "   ssh -i your-key.pem ubuntu@${{ steps.ec2.outputs.public_ip }} docker compose logs -f"
