@@ -85,12 +85,3 @@ resource "aws_instance" "lab" {
   }
 }
 
-# Wait for instance to be running
-resource "aws_instance_state" "lab" {
-  instance_id = aws_instance.lab.id
-  state       = "running"
-
-  timeouts {
-    create = "5m"
-  }
-}
