@@ -1,4 +1,4 @@
-# DevOps Network Lab V2 (AWS Academy Ready)
+# DevOps Network Lab V2 (AWS Academy Ready) - Pr Nordine GRASSA
 
 ## Stack
 - AWS EC2 (Terraform)
