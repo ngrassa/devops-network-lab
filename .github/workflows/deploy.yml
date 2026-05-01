@@ -18,7 +18,6 @@ jobs:
 
     - name: Check required files
       run: |
-        echo "🔍 Checking required files..."
         for f in terraform/main.tf terraform/variables.tf terraform/outputs.tf docker-compose.yml ansible/playbook.yml scripts/test.sh; do
           test -f "$f" && echo "✓ $f found" || { echo "✗ $f NOT found"; exit 1; }
         done
@@ -44,7 +43,6 @@ jobs:
 
     - name: Verify AWS credentials
       run: |
-        echo "🔐 Verifying AWS credentials..."
         aws sts get-caller-identity
         echo "✓ AWS credentials verified"
 
@@ -83,14 +81,9 @@ jobs:
 
     - name: Wait for EC2 SSH to be ready
       run: |
-        echo "⏳ Waiting for SSH..."
         for i in {1..30}; do
-          if nc -z -w5 ${{ steps.ec2.outputs.public_ip }} 22 2>/dev/null; then
-            echo "✓ SSH port is open!"
-            break
-          fi
-          echo "⏳ Attempt $i/30..."
-          sleep 10
+          nc -z -w5 ${{ steps.ec2.outputs.public_ip }} 22 2>/dev/null && echo "✓ SSH ready" && break
+          echo "⏳ $i/30..."; sleep 10
         done
 
     - name: Deploy application via SSH
@@ -103,73 +96,66 @@ jobs:
         timeout: 600s
         script: |
           set -e
-          echo "========================================="
-          echo "🚀 Starting DevOps Lab Deployment"
-          echo "========================================="
 
+          # ── 1. Paquets ────────────────────────────────────────────────
           sudo apt-get update -qq
           sudo apt-get install -y -qq docker.io docker-compose-v2 ansible git
 
+          # ── 2. Nettoyage réseau AVANT de démarrer Docker ─────────────
+          # Arrêt de Docker pour libérer toutes les interfaces kernel
+          sudo systemctl stop docker docker.socket 2>/dev/null || true
+          sleep 3
+
+          # Suppression de toutes les interfaces bridge br-* du kernel
+          for br in $(ip link show type bridge 2>/dev/null \
+                      | awk -F': ' '/^[0-9]+:/{print $2}' \
+                      | grep '^br-'); do
+            sudo ip link set "$br" down   2>/dev/null || true
+            sudo ip link delete "$br"     2>/dev/null || true
+            echo "Supprimé: $br"
+          done
+
+          # ── 3. Redémarrage propre de Docker ──────────────────────────
           sudo systemctl start docker
           sudo systemctl enable docker
           sudo usermod -aG docker ubuntu
           sudo chmod 660 /var/run/docker.sock
           sudo chown root:docker /var/run/docker.sock
 
-          # Wait for Docker daemon to be ready
-          for i in {1..15}; do
-            sudo docker ps &>/dev/null && break || sleep 2
+          # Attente daemon Docker
+          for i in {1..20}; do
+            sudo docker ps &>/dev/null && echo "✓ Docker ready" && break || sleep 2
           done
 
-          # Clone or update repo
+          # ── 4. Repo ───────────────────────────────────────────────────
           REPO_DIR=~/devops-lab
           if [ -d "$REPO_DIR/.git" ]; then
-            cd $REPO_DIR && git pull origin master
+            cd "$REPO_DIR" && git pull origin master
           else
-            git clone https://github.com/ngrassa/devops-network-lab.git $REPO_DIR
-            cd $REPO_DIR
+            git clone https://github.com/ngrassa/devops-network-lab.git "$REPO_DIR"
           fi
 
-          # Nettoyage complet des réseaux Docker et interfaces kernel orphelines
-          # docker network prune seul ne suffit pas : les interfaces br-xxxx
-          # restent actives dans le kernel et bloquent la réassignation d'adresses IP
+          # ── 5. Docker Compose (via sg pour activer le groupe docker) ──
           sg docker -c "
             set -e
             cd $REPO_DIR
-
-            # 1. Arrêt propre des containers
             docker compose down --remove-orphans --volumes 2>/dev/null || true
-
-            # 2. Supprimer les réseaux Docker nommés explicitement
-            docker network rm devops-lab_vlan10 devops-lab_vlan20 2>/dev/null || true
-
-            # 3. Supprimer TOUTES les interfaces bridge orphelines du kernel
-            #    (cause réelle de 'Address already in use')
-            for br in \$(sudo ip link show type bridge 2>/dev/null | awk -F': ' '/^[0-9]+:/{print \$2}' | grep '^br-'); do
-              sudo ip link set \$br down 2>/dev/null || true
-              sudo ip link delete \$br 2>/dev/null || true
-              echo \"Supprimé interface kernel : \$br\"
-            done
-
-            # 4. Purge finale Docker
             docker network prune -f
-
-            # 5. Lancement
             docker compose up -d
             sleep 15
             docker compose ps
           "
 
+          # ── 6. Ansible + tests ────────────────────────────────────────
+          cd "$REPO_DIR"
           ansible-playbook ansible/playbook.yml
           bash scripts/test.sh
 
           echo "✅ Deployment completed!"
-          sg docker -c "docker compose -f $REPO_DIR/docker-compose.yml ps"
 
     - name: Deployment Summary
       if: always()
       run: |
-        echo "📋 Deployment Summary"
-        echo "EC2 IP: ${{ steps.ec2.outputs.public_ip }}"
-        echo "Region: ${{ env.AWS_REGION }}"
-        echo "Connect: ssh -i your-key.pem ubuntu@${{ steps.ec2.outputs.public_ip }}"
+        echo "EC2 IP : ${{ steps.ec2.outputs.public_ip }}"
+        echo "Region : ${{ env.AWS_REGION }}"
+        echo "SSH    : ssh -i your-key.pem ubuntu@${{ steps.ec2.outputs.public_ip }}"
