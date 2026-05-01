@@ -135,7 +135,13 @@ jobs:
           sg docker -c "
             set -e
             cd $REPO_DIR
-            docker compose down --remove-orphans || true
+
+            # Arrêt propre et suppression des réseaux Docker orphelins
+            # (évite l'erreur 'Address already in use' sur re-déploiement)
+            docker compose down --remove-orphans --volumes 2>/dev/null || true
+            docker network rm devops-lab_vlan10 devops-lab_vlan20 2>/dev/null || true
+            docker network prune -f
+
             docker compose up -d
             sleep 15
             docker compose ps
