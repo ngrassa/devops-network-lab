@@ -16,7 +16,7 @@
       command: docker exec router iptables -t nat -A POSTROUTING -j MASQUERADE
       changed_when: true
 
-    - name: Get router IP on vlan10
+    - name: Get router IPs
       command: docker exec router hostname -I
       register: router_ips
       changed_when: false
@@ -25,18 +25,38 @@
       debug:
         msg: "Router IPs: {{ router_ips.stdout }}"
 
-    - name: Get pc1 default gateway
-      command: docker exec pc1 ip route show default
-      register: pc1_gw
+    # Routes statiques : les PCs du VLAN 10 joignent le VLAN 20 via le router
+    - name: Add route on pc1 to reach VLAN 20 via router
+      command: docker exec pc1 ip route add 172.18.0.0/16 via 172.19.0.3
+      register: route_pc1
+      failed_when: route_pc1.rc != 0 and 'File exists' not in route_pc1.stderr
+      changed_when: route_pc1.rc == 0
+
+    - name: Add route on pc2 to reach VLAN 20 via router
+      command: docker exec pc2 ip route add 172.18.0.0/16 via 172.19.0.3
+      register: route_pc2
+      failed_when: route_pc2.rc != 0 and 'File exists' not in route_pc2.stderr
+      changed_when: route_pc2.rc == 0
+
+    # Route statique : le PC du VLAN 20 joint le VLAN 10 via le router
+    - name: Add route on pc3 to reach VLAN 10 via router
+      command: docker exec pc3 ip route add 172.19.0.0/16 via 172.18.0.3
+      register: route_pc3
+      failed_when: route_pc3.rc != 0 and 'File exists' not in route_pc3.stderr
+      changed_when: route_pc3.rc == 0
+
+    - name: Get pc1 routes
+      command: docker exec pc1 ip route show
+      register: pc1_routes
       changed_when: false
 
-    - name: Get pc3 default gateway
-      command: docker exec pc3 ip route show default
-      register: pc3_gw
+    - name: Get pc3 routes
+      command: docker exec pc3 ip route show
+      register: pc3_routes
       changed_when: false
 
     - name: Show routing info
       debug:
         msg:
-          - "PC1 gateway: {{ pc1_gw.stdout }}"
-          - "PC3 gateway: {{ pc3_gw.stdout }}"
+          - "PC1 routes: {{ pc1_routes.stdout }}"
+          - "PC3 routes: {{ pc3_routes.stdout }}"

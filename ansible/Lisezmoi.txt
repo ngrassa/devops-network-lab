@@ -1,0 +1,12 @@
+Le test intra-VLAN passe (PC1 → PC2 OK), mais le premier test inter-VLAN (PC1 → PC3) échoue. C'est parce que les conteneurs PC1 et PC3 sont sur des réseaux Docker différents et leur passerelle par défaut pointe vers le gateway Docker (172.x.0.1) au lieu du router.
+Il faut ajouter des routes statiques dans le playbook Ansible pour que PC1/PC2 sachent joindre le VLAN 20 via le router, et que PC3 sache joindre le VLAN 10 via le router.
+
+Le problème : les conteneurs PC1 et PC3 sont sur deux réseaux Docker séparés. Leur passerelle par défaut (172.x.0.1) est le bridge Docker, qui ne route pas entre les deux réseaux. Le trafic inter-VLAN doit passer par ton conteneur router.
+Ce que le playbook corrigé ajoute — 3 routes statiques :
+
+PC1 : 172.18.0.0/16 via 172.19.0.3 → pour joindre le VLAN 20, passe par le router
+PC2 : idem
+PC3 : 172.19.0.0/16 via 172.18.0.3 → pour joindre le VLAN 10, passe par le router
+
+
+la nouvelle version du playbook : les pcs des deux Vlans ping mutuellement.
