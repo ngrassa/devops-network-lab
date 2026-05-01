@@ -16,176 +16,56 @@
       command: docker exec router iptables -t nat -A POSTROUTING -j MASQUERADE
       changed_when: true
 
-    # Detecter dynamiquement les IPs du router sur chaque VLAN
     - name: Get router IP on vlan10
-      command: docker inspect -f '{{ "{{" }} .NetworkSettings.Networks.devops_lab_vlan10.IPAddress {{ "}}" }}' router
+      shell: >
+        docker inspect router
+        | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['NetworkSettings']['Networks']['devops-lab_vlan10']['IPAddress'])"
       register: router_vlan10
       changed_when: false
-      vars:
-        ansible_connection: local
-
-    - name: Try alternate network name for vlan10
-      command: docker inspect -f '{{ "{{" }} .NetworkSettings.Networks.devopslab_vlan10.IPAddress {{ "}}" }}' router
-      register: router_vlan10_alt
-      changed_when: false
-      when: router_vlan10.stdout == "" or router_vlan10.rc != 0
-      ignore_errors: true
 
     - name: Get router IP on vlan20
-      command: docker inspect -f '{{ "{{" }} .NetworkSettings.Networks.devops_lab_vlan20.IPAddress {{ "}}" }}' router
+      shell: >
+        docker inspect router
+        | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['NetworkSettings']['Networks']['devops-lab_vlan20']['IPAddress'])"
       register: router_vlan20
       changed_when: false
 
-    - name: Try alternate network name for vlan20
-      command: docker inspect -f '{{ "{{" }} .NetworkSettings.Networks.devopslab_vlan20.IPAddress {{ "}}" }}' router
-      register: router_vlan20_alt
-      changed_when: false
-      when: router_vlan20.stdout == "" or router_vlan20.rc != 0
-      ignore_errors: true
-
-    - name: Set router IP facts
-      set_fact:
-        router_ip_vlan10: "{{ router_vlan10.stdout if router_vlan10.stdout != '' else router_vlan10_alt.stdout | default('') }}"
-        router_ip_vlan20: "{{ router_vlan20.stdout if router_vlan20.stdout != '' else router_vlan20_alt.stdout | default('') }}"
-
-    - name: Show router IPs
-      debug:
-        msg: "Router VLAN10: {{ router_ip_vlan10 }} | Router VLAN20: {{ router_ip_vlan20 }}"
-
-    # Detecter les subnets de chaque VLAN
     - name: Get vlan10 subnet
-      shell: "docker network inspect devops-lab_vlan10 -f '{{ \"{{\" }} (index .IPAM.Config 0).Subnet {{ \"}}\" }}'"
+      shell: >
+        docker network inspect devops-lab_vlan10
+        | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['IPAM']['Config'][0]['Subnet'])"
       register: vlan10_subnet
       changed_when: false
 
     - name: Get vlan20 subnet
-      shell: "docker network inspect devops-lab_vlan20 -f '{{ \"{{\" }} (index .IPAM.Config 0).Subnet {{ \"}}\" }}'"
+      shell: >
+        docker network inspect devops-lab_vlan20
+        | python3 -c "import sys,json; print(json.load(sys.stdin)[0]['IPAM']['Config'][0]['Subnet'])"
       register: vlan20_subnet
       changed_when: false
 
-    - name: Show subnets
-      debug:
-        msg: "VLAN10: {{ vlan10_subnet.stdout }} | VLAN20: {{ vlan20_subnet.stdout }}"
-
-    # Routes statiques : VLAN 10 -> VLAN 20 via router
-    - name: Add route on pc1 to reach VLAN 20 via router
-      command: "docker exec pc1 ip route add {{ vlan20_subnet.stdout }} via {{ router_ip_vlan10 }}"
-      register: route_pc1
-      failed_when: route_pc1.rc != 0 and 'File exists' not in route_pc1.stderr
-      changed_when: route_pc1.rc == 0
-
-    - name: Add route on pc2 to reach VLAN 20 via router
-      command: "docker exec pc2 ip route add {{ vlan20_subnet.stdout }} via {{ router_ip_vlan10 }}"
-      register: route_pc2
-      failed_when: route_pc2.rc != 0 and 'File exists' not in route_pc2.stderr
-      changed_when: route_pc2.rc == 0
-
-    # Route statique : VLAN 20 -> VLAN 10 via router
-    - name: Add route on pc3 to reach VLAN 10 via router
-      command: "docker exec pc3 ip route add {{ vlan10_subnet.stdout }} via {{ router_ip_vlan20 }}"
-      register: route_pc3
-      failed_when: route_pc3.rc != 0 and 'File exists' not in route_pc3.stderr
-      changed_when: route_pc3.rc == 0
-
-    - name: Get pc1 routes
-      command: docker exec pc1 ip route show
-      register: pc1_routes
-      changed_when: false
-
-    - name: Get pc3 routes
-      command: docker exec pc3 ip route show
-      register: pc3_routes
-      changed_when: false
-
-    - name: Show routing info
+    - name: Show detected network info
       debug:
         msg:
-          - "PC1 routes: {{ pc1_routes.stdout }}"
-          - "PC3 routes: {{ pc3_routes.stdout }}"---
-- name: Configure network routing
-  hosts: localhost
-  gather_facts: false
-  become: true
-  tasks:
-    - name: Enable IP forwarding on router
-      command: docker exec router sysctl -w net.ipv4.ip_forward=1
-      changed_when: true
+          - "Router on VLAN10: {{ router_vlan10.stdout }}"
+          - "Router on VLAN20: {{ router_vlan20.stdout }}"
+          - "VLAN10 subnet: {{ vlan10_subnet.stdout }}"
+          - "VLAN20 subnet: {{ vlan20_subnet.stdout }}"
 
-    - name: Set iptables FORWARD policy to ACCEPT
-      command: docker exec router iptables -P FORWARD ACCEPT
-      changed_when: true
-
-    - name: Enable NAT masquerade
-      command: docker exec router iptables -t nat -A POSTROUTING -j MASQUERADE
-      changed_when: true
-
-    # Detecter dynamiquement les IPs du router sur chaque VLAN
-    - name: Get router IP on vlan10
-      command: docker inspect -f '{{ "{{" }} .NetworkSettings.Networks.devops_lab_vlan10.IPAddress {{ "}}" }}' router
-      register: router_vlan10
-      changed_when: false
-      vars:
-        ansible_connection: local
-
-    - name: Try alternate network name for vlan10
-      command: docker inspect -f '{{ "{{" }} .NetworkSettings.Networks.devopslab_vlan10.IPAddress {{ "}}" }}' router
-      register: router_vlan10_alt
-      changed_when: false
-      when: router_vlan10.stdout == "" or router_vlan10.rc != 0
-      ignore_errors: true
-
-    - name: Get router IP on vlan20
-      command: docker inspect -f '{{ "{{" }} .NetworkSettings.Networks.devops_lab_vlan20.IPAddress {{ "}}" }}' router
-      register: router_vlan20
-      changed_when: false
-
-    - name: Try alternate network name for vlan20
-      command: docker inspect -f '{{ "{{" }} .NetworkSettings.Networks.devopslab_vlan20.IPAddress {{ "}}" }}' router
-      register: router_vlan20_alt
-      changed_when: false
-      when: router_vlan20.stdout == "" or router_vlan20.rc != 0
-      ignore_errors: true
-
-    - name: Set router IP facts
-      set_fact:
-        router_ip_vlan10: "{{ router_vlan10.stdout if router_vlan10.stdout != '' else router_vlan10_alt.stdout | default('') }}"
-        router_ip_vlan20: "{{ router_vlan20.stdout if router_vlan20.stdout != '' else router_vlan20_alt.stdout | default('') }}"
-
-    - name: Show router IPs
-      debug:
-        msg: "Router VLAN10: {{ router_ip_vlan10 }} | Router VLAN20: {{ router_ip_vlan20 }}"
-
-    # Detecter les subnets de chaque VLAN
-    - name: Get vlan10 subnet
-      shell: "docker network inspect devops-lab_vlan10 -f '{{ \"{{\" }} (index .IPAM.Config 0).Subnet {{ \"}}\" }}'"
-      register: vlan10_subnet
-      changed_when: false
-
-    - name: Get vlan20 subnet
-      shell: "docker network inspect devops-lab_vlan20 -f '{{ \"{{\" }} (index .IPAM.Config 0).Subnet {{ \"}}\" }}'"
-      register: vlan20_subnet
-      changed_when: false
-
-    - name: Show subnets
-      debug:
-        msg: "VLAN10: {{ vlan10_subnet.stdout }} | VLAN20: {{ vlan20_subnet.stdout }}"
-
-    # Routes statiques : VLAN 10 -> VLAN 20 via router
     - name: Add route on pc1 to reach VLAN 20 via router
-      command: "docker exec pc1 ip route add {{ vlan20_subnet.stdout }} via {{ router_ip_vlan10 }}"
+      command: "docker exec pc1 ip route add {{ vlan20_subnet.stdout }} via {{ router_vlan10.stdout }}"
       register: route_pc1
       failed_when: route_pc1.rc != 0 and 'File exists' not in route_pc1.stderr
       changed_when: route_pc1.rc == 0
 
     - name: Add route on pc2 to reach VLAN 20 via router
-      command: "docker exec pc2 ip route add {{ vlan20_subnet.stdout }} via {{ router_ip_vlan10 }}"
+      command: "docker exec pc2 ip route add {{ vlan20_subnet.stdout }} via {{ router_vlan10.stdout }}"
       register: route_pc2
       failed_when: route_pc2.rc != 0 and 'File exists' not in route_pc2.stderr
       changed_when: route_pc2.rc == 0
 
-    # Route statique : VLAN 20 -> VLAN 10 via router
     - name: Add route on pc3 to reach VLAN 10 via router
-      command: "docker exec pc3 ip route add {{ vlan10_subnet.stdout }} via {{ router_ip_vlan20 }}"
+      command: "docker exec pc3 ip route add {{ vlan10_subnet.stdout }} via {{ router_vlan20.stdout }}"
       register: route_pc3
       failed_when: route_pc3.rc != 0 and 'File exists' not in route_pc3.stderr
       changed_when: route_pc3.rc == 0
