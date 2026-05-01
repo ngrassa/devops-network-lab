@@ -30,9 +30,9 @@ jobs:
           exit 1
         fi
         echo "✓ Confirmation reçue"
-        echo "📋 Raison : ${{ github.event.inputs.reason }}"
+        echo "📋 Raison        : ${{ github.event.inputs.reason }}"
         echo "👤 Déclenché par : ${{ github.actor }}"
-        echo "🕐 Heure : $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "🕐 Heure         : $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 
   destroy:
     name: Terraform Destroy
@@ -59,6 +59,43 @@ jobs:
         aws sts get-caller-identity
         echo "✓ Credentials valides"
 
+    - name: Cleanup orphaned AWS resources (Security Groups, EC2 instances)
+      run: |
+        echo "🧹 Nettoyage des ressources AWS orphelines..."
+
+        # Terminer toutes les instances EC2 taguées Project=DevOps-Network-Lab
+        INSTANCE_IDS=$(aws ec2 describe-instances \
+          --filters "Name=tag:Project,Values=DevOps-Network-Lab" \
+                    "Name=instance-state-name,Values=running,pending,stopping,stopped" \
+          --query 'Reservations[].Instances[].InstanceId' \
+          --output text)
+
+        if [ -n "$INSTANCE_IDS" ]; then
+          echo "🔴 Instances EC2 trouvées : $INSTANCE_IDS"
+          aws ec2 terminate-instances --instance-ids $INSTANCE_IDS
+          echo "⏳ Attente de la terminaison des instances..."
+          aws ec2 wait instance-terminated --instance-ids $INSTANCE_IDS
+          echo "✓ Instances terminées"
+        else
+          echo "✓ Aucune instance EC2 active trouvée"
+        fi
+
+        # Supprimer le Security Group orphelin s'il existe
+        SG_ID=$(aws ec2 describe-security-groups \
+          --filters "Name=group-name,Values=devops-network-lab-sg" \
+          --query 'SecurityGroups[0].GroupId' \
+          --output text 2>/dev/null || echo "None")
+
+        if [ "$SG_ID" != "None" ] && [ -n "$SG_ID" ]; then
+          echo "🔴 Security Group orphelin trouvé : $SG_ID"
+          sleep 15
+          aws ec2 delete-security-group --group-id $SG_ID && \
+            echo "✓ Security Group $SG_ID supprimé" || \
+            echo "⚠️  Impossible de supprimer $SG_ID (peut-être encore utilisé)"
+        else
+          echo "✓ Aucun Security Group orphelin trouvé"
+        fi
+
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
       with:
@@ -70,39 +107,42 @@ jobs:
         echo "📦 Initialisation Terraform..."
         terraform init
 
-    - name: Show resources to destroy
-      working-directory: terraform
-      run: |
-        echo "📋 Ressources qui vont être détruites :"
-        terraform show 2>/dev/null || echo "(aucun état Terraform trouvé localement)"
-        echo ""
-        echo "⚠️  Destruction dans 10 secondes..."
-        sleep 10
-
     - name: Terraform Destroy
       working-directory: terraform
       run: |
         echo "========================================="
-        echo "💣 Destruction de l infrastructure..."
+        echo "💣 Destruction de l'infrastructure..."
         echo "========================================="
-        terraform destroy -auto-approve -no-color
+        terraform destroy -auto-approve -no-color || true
         echo ""
-        echo "✅ Infrastructure détruite avec succès"
+        echo "✅ terraform destroy terminé"
 
-    - name: Verify destruction
+    - name: Verify full destruction
       run: |
-        echo "🔍 Vérification dans AWS..."
+        echo "🔍 Vérification finale dans AWS..."
+
         INSTANCES=$(aws ec2 describe-instances \
           --filters "Name=tag:Project,Values=DevOps-Network-Lab" \
                     "Name=instance-state-name,Values=running,pending,stopping,stopped" \
           --query 'Reservations[].Instances[].InstanceId' \
           --output text)
 
+        SG=$(aws ec2 describe-security-groups \
+          --filters "Name=group-name,Values=devops-network-lab-sg" \
+          --query 'SecurityGroups[0].GroupId' \
+          --output text 2>/dev/null || echo "None")
+
+        echo ""
         if [ -z "$INSTANCES" ]; then
-          echo "✓ Aucune instance EC2 active trouvée — destruction confirmée"
+          echo "✓ Aucune instance EC2 active"
         else
-          echo "⚠️  Instances encore visibles : $INSTANCES"
-          echo "   Elles sont peut-être en cours de terminaison (normal, attendre ~1 min)"
+          echo "⚠️  Instances encore présentes : $INSTANCES (terminaison en cours, normal)"
+        fi
+
+        if [ "$SG" = "None" ] || [ -z "$SG" ]; then
+          echo "✓ Security Group supprimé"
+        else
+          echo "⚠️  Security Group encore présent : $SG"
         fi
 
     - name: Destroy Summary
