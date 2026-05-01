@@ -114,8 +114,9 @@ jobs:
           sudo systemctl enable docker
           sudo usermod -aG docker ubuntu
           sudo chmod 660 /var/run/docker.sock
+          sudo chown root:docker /var/run/docker.sock
 
-          # Wait for Docker
+          # Wait for Docker daemon to be ready
           for i in {1..15}; do
             sudo docker ps &>/dev/null && break || sleep 2
           done
@@ -129,15 +130,22 @@ jobs:
             cd $REPO_DIR
           fi
 
-          docker compose down --remove-orphans || true
-          docker compose up -d
-          sleep 15
+          # Run all Docker commands via sg to activate group in current session
+          # (usermod needs a new login session to take effect — sg bypasses that)
+          sg docker -c "
+            set -e
+            cd $REPO_DIR
+            docker compose down --remove-orphans || true
+            docker compose up -d
+            sleep 15
+            docker compose ps
+          "
 
           ansible-playbook ansible/playbook.yml
           bash scripts/test.sh
 
           echo "✅ Deployment completed!"
-          docker compose ps
+          sg docker -c "docker compose -f $REPO_DIR/docker-compose.yml ps"
 
     - name: Deployment Summary
       if: always()
