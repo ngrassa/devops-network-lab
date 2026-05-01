@@ -1,0 +1,121 @@
+name: Destroy Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Tapez "DESTROY" pour confirmer la destruction de toute l infrastructure'
+        required: true
+        default: ''
+      reason:
+        description: 'Raison de la destruction (optionnel)'
+        required: false
+        default: 'Fin de lab'
+
+env:
+  AWS_REGION: us-east-1
+  TF_VERSION: "1.5.7"
+
+jobs:
+  confirm-destroy:
+    name: Vérification de confirmation
+    runs-on: ubuntu-latest
+    steps:
+    - name: Check confirmation input
+      run: |
+        echo "🔍 Vérification de la confirmation..."
+        if [ "${{ github.event.inputs.confirm }}" != "DESTROY" ]; then
+          echo "❌ Confirmation invalide : '${{ github.event.inputs.confirm }}'"
+          echo "   Vous devez taper exactement : DESTROY"
+          exit 1
+        fi
+        echo "✓ Confirmation reçue"
+        echo "📋 Raison : ${{ github.event.inputs.reason }}"
+        echo "👤 Déclenché par : ${{ github.actor }}"
+        echo "🕐 Heure : $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+  destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    needs: confirm-destroy
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Verify AWS credentials
+      run: |
+        echo "🔐 Vérification des credentials AWS..."
+        aws sts get-caller-identity
+        echo "✓ Credentials valides"
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ env.TF_VERSION }}
+
+    - name: Terraform Init
+      working-directory: terraform
+      run: |
+        echo "📦 Initialisation Terraform..."
+        terraform init
+
+    - name: Show resources to destroy
+      working-directory: terraform
+      run: |
+        echo "📋 Ressources qui vont être détruites :"
+        terraform show 2>/dev/null || echo "(aucun état Terraform trouvé localement)"
+        echo ""
+        echo "⚠️  Destruction dans 10 secondes..."
+        sleep 10
+
+    - name: Terraform Destroy
+      working-directory: terraform
+      run: |
+        echo "========================================="
+        echo "💣 Destruction de l infrastructure..."
+        echo "========================================="
+        terraform destroy -auto-approve -no-color
+        echo ""
+        echo "✅ Infrastructure détruite avec succès"
+
+    - name: Verify destruction
+      run: |
+        echo "🔍 Vérification dans AWS..."
+        INSTANCES=$(aws ec2 describe-instances \
+          --filters "Name=tag:Project,Values=DevOps-Network-Lab" \
+                    "Name=instance-state-name,Values=running,pending,stopping,stopped" \
+          --query 'Reservations[].Instances[].InstanceId' \
+          --output text)
+
+        if [ -z "$INSTANCES" ]; then
+          echo "✓ Aucune instance EC2 active trouvée — destruction confirmée"
+        else
+          echo "⚠️  Instances encore visibles : $INSTANCES"
+          echo "   Elles sont peut-être en cours de terminaison (normal, attendre ~1 min)"
+        fi
+
+    - name: Destroy Summary
+      if: always()
+      run: |
+        echo ""
+        echo "========================================="
+        echo "📋 Résumé de la destruction"
+        echo "========================================="
+        echo "👤 Déclenché par : ${{ github.actor }}"
+        echo "📅 Date          : $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "📋 Raison        : ${{ github.event.inputs.reason }}"
+        echo "🌍 Région        : ${{ env.AWS_REGION }}"
+        echo ""
+        echo "💡 Pour redéployer : lancez le workflow 'DevOps Network Lab CI/CD'"
+        echo "========================================="
