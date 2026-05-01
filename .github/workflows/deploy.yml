@@ -42,9 +42,7 @@ jobs:
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Verify AWS credentials
-      run: |
-        aws sts get-caller-identity
-        echo "✓ AWS credentials verified"
+      run: aws sts get-caller-identity
 
     - name: Setup Terraform
       uses: hashicorp/setup-terraform@v3
@@ -54,10 +52,6 @@ jobs:
     - name: Terraform Init
       working-directory: terraform
       run: terraform init
-
-    - name: Terraform Format
-      working-directory: terraform
-      run: terraform fmt -check -recursive || terraform fmt -recursive
 
     - name: Terraform Validate
       working-directory: terraform
@@ -77,13 +71,12 @@ jobs:
       run: |
         PUBLIC_IP=$(terraform output -raw public_ip)
         echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
-        echo "✓ EC2 Public IP: $PUBLIC_IP"
 
     - name: Wait for EC2 SSH to be ready
       run: |
         for i in {1..30}; do
-          nc -z -w5 ${{ steps.ec2.outputs.public_ip }} 22 2>/dev/null && echo "✓ SSH ready" && break
-          echo "⏳ $i/30..."; sleep 10
+          nc -z -w5 ${{ steps.ec2.outputs.public_ip }} 22 2>/dev/null && break
+          sleep 10
         done
 
     - name: Deploy application via SSH
@@ -97,37 +90,29 @@ jobs:
         script: |
           set -e
 
-          # ── 1. Paquets ────────────────────────────────────────────────
+          # 1. Paquets
           sudo apt-get update -qq
           sudo apt-get install -y -qq docker.io docker-compose-v2 ansible git
 
-          # ── 2. Nettoyage réseau AVANT de démarrer Docker ─────────────
-          # Arrêt de Docker pour libérer toutes les interfaces kernel
+          # 2. Arreter Docker, purger TOUT, redemarrer
           sudo systemctl stop docker docker.socket 2>/dev/null || true
-          sleep 3
-
-          # Suppression de toutes les interfaces bridge br-* du kernel
-          for br in $(ip link show type bridge 2>/dev/null \
-                      | awk -F': ' '/^[0-9]+:/{print $2}' \
-                      | grep '^br-'); do
-            sudo ip link set "$br" down   2>/dev/null || true
-            sudo ip link delete "$br"     2>/dev/null || true
-            echo "Supprimé: $br"
+          sleep 2
+          sudo rm -rf /var/lib/docker/network/files/* 2>/dev/null || true
+          for br in $(ip link show type bridge 2>/dev/null | awk -F': ' '/^[0-9]+:/{print $2}' | grep '^br-'); do
+            sudo ip link set "$br" down 2>/dev/null || true
+            sudo ip link delete "$br" 2>/dev/null || true
           done
-
-          # ── 3. Redémarrage propre de Docker ──────────────────────────
           sudo systemctl start docker
           sudo systemctl enable docker
           sudo usermod -aG docker ubuntu
           sudo chmod 660 /var/run/docker.sock
           sudo chown root:docker /var/run/docker.sock
 
-          # Attente daemon Docker
           for i in {1..20}; do
-            sudo docker ps &>/dev/null && echo "✓ Docker ready" && break || sleep 2
+            sudo docker ps &>/dev/null && break || sleep 2
           done
 
-          # ── 4. Repo ───────────────────────────────────────────────────
+          # 3. Repo
           REPO_DIR=~/devops-lab
           if [ -d "$REPO_DIR/.git" ]; then
             cd "$REPO_DIR" && git pull origin master
@@ -135,27 +120,26 @@ jobs:
             git clone https://github.com/ngrassa/devops-network-lab.git "$REPO_DIR"
           fi
 
-          # ── 5. Docker Compose (via sg pour activer le groupe docker) ──
+          # 4. Docker Compose
           sg docker -c "
             set -e
             cd $REPO_DIR
             docker compose down --remove-orphans --volumes 2>/dev/null || true
-            docker network prune -f
+            docker system prune -f --volumes 2>/dev/null || true
             docker compose up -d
             sleep 15
             docker compose ps
           "
 
-          # ── 6. Ansible + tests ────────────────────────────────────────
+          # 5. Ansible + tests
           cd "$REPO_DIR"
           ansible-playbook ansible/playbook.yml
           bash scripts/test.sh
 
-          echo "✅ Deployment completed!"
+          echo "Deployment completed!"
 
     - name: Deployment Summary
       if: always()
       run: |
         echo "EC2 IP : ${{ steps.ec2.outputs.public_ip }}"
-        echo "Region : ${{ env.AWS_REGION }}"
         echo "SSH    : ssh -i your-key.pem ubuntu@${{ steps.ec2.outputs.public_ip }}"

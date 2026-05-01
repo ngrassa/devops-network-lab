@@ -4,53 +4,41 @@ services:
     container_name: pc1
     command: sh -c "apk add --no-cache iputils && sleep infinity"
     networks:
-      vlan10:
-        ipv4_address: 192.168.110.2
+      - vlan10
 
   pc2:
     image: alpine
     container_name: pc2
     command: sh -c "apk add --no-cache iputils && sleep infinity"
     networks:
-      vlan10:
-        ipv4_address: 192.168.110.3
+      - vlan10
 
   pc3:
     image: alpine
     container_name: pc3
     command: sh -c "apk add --no-cache iputils && sleep infinity"
     networks:
-      vlan20:
-        ipv4_address: 192.168.120.2
+      - vlan20
 
   router:
     image: ubuntu:24.04
     container_name: router
     privileged: true
+    cap_add:
+      - NET_ADMIN
     command: >
       sh -c "apt-get update -qq &&
              apt-get install -y -qq iproute2 iptables iputils-ping &&
              sysctl -w net.ipv4.ip_forward=1 &&
-             iptables -A FORWARD -j ACCEPT &&
+             iptables -P FORWARD ACCEPT &&
              iptables -t nat -A POSTROUTING -j MASQUERADE &&
              sleep infinity"
     networks:
-      vlan10:
-        ipv4_address: 192.168.110.1
-      vlan20:
-        ipv4_address: 192.168.120.1
+      - vlan10
+      - vlan20
 
 networks:
   vlan10:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 192.168.110.0/24
-          gateway: 192.168.110.1
-
   vlan20:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 192.168.120.0/24
-          gateway: 192.168.120.1
