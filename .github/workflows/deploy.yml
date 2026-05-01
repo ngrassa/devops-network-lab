@@ -79,6 +79,15 @@ jobs:
           sleep 10
         done
 
+    - name: Copy project files to EC2
+      uses: appleboy/scp-action@master
+      with:
+        host: ${{ steps.ec2.outputs.public_ip }}
+        username: ubuntu
+        key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+        source: "docker-compose.yml,ansible/,scripts/"
+        target: "~/devops-lab"
+
     - name: Deploy application via SSH
       uses: appleboy/ssh-action@master
       with:
@@ -92,7 +101,7 @@ jobs:
 
           # 1. Paquets
           sudo apt-get update -qq
-          sudo apt-get install -y -qq docker.io docker-compose-v2 ansible git
+          sudo apt-get install -y -qq docker.io docker-compose-v2 ansible
 
           # 2. Arreter Docker, purger TOUT, redemarrer
           sudo systemctl stop docker docker.socket 2>/dev/null || true
@@ -112,29 +121,17 @@ jobs:
             sudo docker ps &>/dev/null && break || sleep 2
           done
 
-          # 3. Repo
-          REPO_DIR=~/devops-lab
-          if [ -d "$REPO_DIR/.git" ]; then
-            cd "$REPO_DIR" && git pull origin master
-          else
-            git clone https://github.com/ngrassa/devops-network-lab.git "$REPO_DIR"
-          fi
+          # 3. Docker Compose
+          cd ~/devops-lab
+          sudo docker compose down --remove-orphans --volumes 2>/dev/null || true
+          sudo docker system prune -f --volumes 2>/dev/null || true
+          sudo docker compose up -d
+          sleep 15
+          sudo docker compose ps
 
-          # 4. Docker Compose
-          sg docker -c "
-            set -e
-            cd $REPO_DIR
-            docker compose down --remove-orphans --volumes 2>/dev/null || true
-            docker system prune -f --volumes 2>/dev/null || true
-            docker compose up -d
-            sleep 15
-            docker compose ps
-          "
-
-          # 5. Ansible + tests
-          cd "$REPO_DIR"
-          ansible-playbook ansible/playbook.yml
-          bash scripts/test.sh
+          # 4. Ansible + tests
+          sudo ansible-playbook ansible/playbook.yml
+          sudo bash scripts/test.sh
 
           echo "Deployment completed!"
 
