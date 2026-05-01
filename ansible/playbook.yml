@@ -1,0 +1,40 @@
+---
+- name: Configure network routing
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Enable IP forwarding on router
+      command: docker exec router sysctl -w net.ipv4.ip_forward=1
+      register: ip_forward_result
+      changed_when: true
+
+    - name: Allow traffic forwarding via iptables
+      command: docker exec router iptables -A FORWARD -j ACCEPT
+      register: iptables_result
+      changed_when: true
+
+    - name: Enable NAT masquerade
+      command: docker exec router iptables -t nat -A POSTROUTING -j MASQUERADE
+      register: nat_result
+      changed_when: true
+
+    - name: Add route to VLAN20 from PC1
+      command: docker exec pc1 ip route add 192.168.20.0/24 via 192.168.10.1
+      register: route_pc1
+      failed_when: route_pc1.rc != 0 and 'RTNETLINK answers: File exists' not in route_pc1.stderr
+      changed_when: route_pc1.rc == 0
+
+    - name: Add route to VLAN10 from PC3
+      command: docker exec pc3 ip route add 192.168.10.0/24 via 192.168.20.1
+      register: route_pc3
+      failed_when: route_pc3.rc != 0 and 'RTNETLINK answers: File exists' not in route_pc3.stderr
+      changed_when: route_pc3.rc == 0
+
+    - name: Verify IP forwarding is active
+      command: docker exec router sysctl net.ipv4.ip_forward
+      register: verify_result
+      changed_when: false
+
+    - name: Show IP forwarding status
+      debug:
+        msg: "{{ verify_result.stdout }}"

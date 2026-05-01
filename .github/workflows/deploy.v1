@@ -1,0 +1,34 @@
+name: DevOps Network Lab CI/CD
+on:
+  push:
+    branches: [ "master" ]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: aws-actions/configure-aws-credentials@v2
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+    - uses: hashicorp/setup-terraform@v2
+    - run: terraform -chdir=terraform init
+    - run: terraform -chdir=terraform apply -auto-approve
+    - name: Get EC2 IP
+      run: echo "EC2_IP=$(terraform -chdir=terraform output -raw public_ip)" >> $GITHUB_ENV
+    - name: Deploy
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ env.EC2_IP }}
+        username: ubuntu
+        key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+        script: |
+          sudo apt update
+          sudo apt install -y docker.io docker-compose-v2 ansible git
+          sudo usermod -aG docker ubuntu
+          git clone https://github.com/devops-network-lab.git
+          cd YOUR_REPO
+          docker compose up -d
+          ansible-playbook ansible/playbook.yml
+          bash scripts/test.sh
