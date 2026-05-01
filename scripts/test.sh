@@ -9,10 +9,10 @@ PASS=0
 FAIL=0
 
 # Recuperer les IPs dynamiquement
-PC1_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pc1 | head -c -1)
-PC2_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pc2 | head -c -1)
-PC3_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pc3 | head -c -1)
-ROUTER_IPS=$(docker exec router hostname -I)
+PC1_IP=$(sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pc1 | head -c -1)
+PC2_IP=$(sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pc2 | head -c -1)
+PC3_IP=$(sudo docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' pc3 | head -c -1)
+ROUTER_IPS=$(sudo docker exec router hostname -I)
 
 echo ""
 echo "IPs detectees :"
@@ -36,16 +36,16 @@ run_test() {
 }
 
 echo "Test intra-VLAN (VLAN10) :"
-run_test "PC1 -> PC2" "docker exec pc1 ping -c 2 -W 3 $PC2_IP"
+run_test "PC1 -> PC2" "sudo docker exec pc1 ping -c 2 -W 3 $PC2_IP"
 
 echo ""
 echo "Test inter-VLAN (via Router) :"
-run_test "PC1 -> PC3" "docker exec pc1 ping -c 2 -W 3 $PC3_IP"
-run_test "PC3 -> PC1" "docker exec pc3 ping -c 2 -W 3 $PC1_IP"
+run_test "PC1 -> PC3" "sudo docker exec pc1 ping -c 2 -W 3 $PC3_IP"
+run_test "PC3 -> PC1" "sudo docker exec pc3 ping -c 2 -W 3 $PC1_IP"
 
 echo ""
 echo "Test IP Forwarding :"
-run_test "ip_forward actif" "docker exec router sysctl net.ipv4.ip_forward | grep -q '= 1'"
+run_test "ip_forward actif" "sudo docker exec router sysctl net.ipv4.ip_forward | grep -q '= 1'"
 
 echo ""
 echo "========================================"
