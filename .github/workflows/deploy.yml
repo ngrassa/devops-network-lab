@@ -130,18 +130,31 @@ jobs:
             cd $REPO_DIR
           fi
 
-          # Run all Docker commands via sg to activate group in current session
-          # (usermod needs a new login session to take effect — sg bypasses that)
+          # Nettoyage complet des réseaux Docker et interfaces kernel orphelines
+          # docker network prune seul ne suffit pas : les interfaces br-xxxx
+          # restent actives dans le kernel et bloquent la réassignation d'adresses IP
           sg docker -c "
             set -e
             cd $REPO_DIR
 
-            # Arrêt propre et suppression des réseaux Docker orphelins
-            # (évite l'erreur 'Address already in use' sur re-déploiement)
+            # 1. Arrêt propre des containers
             docker compose down --remove-orphans --volumes 2>/dev/null || true
+
+            # 2. Supprimer les réseaux Docker nommés explicitement
             docker network rm devops-lab_vlan10 devops-lab_vlan20 2>/dev/null || true
+
+            # 3. Supprimer TOUTES les interfaces bridge orphelines du kernel
+            #    (cause réelle de 'Address already in use')
+            for br in \$(sudo ip link show type bridge 2>/dev/null | awk -F': ' '/^[0-9]+:/{print \$2}' | grep '^br-'); do
+              sudo ip link set \$br down 2>/dev/null || true
+              sudo ip link delete \$br 2>/dev/null || true
+              echo \"Supprimé interface kernel : \$br\"
+            done
+
+            # 4. Purge finale Docker
             docker network prune -f
 
+            # 5. Lancement
             docker compose up -d
             sleep 15
             docker compose ps

@@ -5,7 +5,7 @@ services:
     command: sh -c "apk add --no-cache iputils && sleep infinity"
     networks:
       vlan10:
-        ipv4_address: 192.168.10.2
+        ipv4_address: 192.168.110.2
 
   pc2:
     image: alpine
@@ -13,7 +13,7 @@ services:
     command: sh -c "apk add --no-cache iputils && sleep infinity"
     networks:
       vlan10:
-        ipv4_address: 192.168.10.3
+        ipv4_address: 192.168.110.3
 
   pc3:
     image: alpine
@@ -21,7 +21,7 @@ services:
     command: sh -c "apk add --no-cache iputils && sleep infinity"
     networks:
       vlan20:
-        ipv4_address: 192.168.20.2
+        ipv4_address: 192.168.120.2
 
   router:
     image: ubuntu:24.04
@@ -36,21 +36,21 @@ services:
              sleep infinity"
     networks:
       vlan10:
-        ipv4_address: 192.168.10.1
+        ipv4_address: 192.168.110.1
       vlan20:
-        ipv4_address: 192.168.20.1
+        ipv4_address: 192.168.120.1
 
 networks:
   vlan10:
     driver: bridge
     ipam:
       config:
-        - subnet: 192.168.10.0/24
-          gateway: 192.168.10.1
+        - subnet: 192.168.110.0/24
+          gateway: 192.168.110.1
 
   vlan20:
     driver: bridge
     ipam:
       config:
-        - subnet: 192.168.20.0/24
-          gateway: 192.168.20.1
+        - subnet: 192.168.120.0/24
+          gateway: 192.168.120.1
