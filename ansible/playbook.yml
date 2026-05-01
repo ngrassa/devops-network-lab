@@ -2,6 +2,7 @@
 - name: Configure network routing
   hosts: localhost
   gather_facts: false
+  become: true
   tasks:
     - name: Enable IP forwarding on router
       command: docker exec router sysctl -w net.ipv4.ip_forward=1
